@@ -1,0 +1,56 @@
+name: Deploy to fserver
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.FSERVER_SSH_KEY }}
+          log-public-key: false
+
+      - name: Add host to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H 167.233.103.236 >> ~/.ssh/known_hosts
+
+      - name: Deploy on fserver
+        env:
+          SERVER_IP: 167.233.103.236
+          SERVER_USER: root
+          DEPLOY_PATH: /root/ai-bot
+        run: |
+          echo "🚀 Deploying to $SERVER_IP..."
+          ssh $SERVER_USER@$SERVER_IP << 'REMOTE_SCRIPT'
+            set -e
+            cd /root/ai-bot
+            
+            echo "📥 Pulling latest code..."
+            git fetch origin
+            git reset --hard origin/main || git reset --hard origin/master
+            
+            echo "🔄 Restarting services..."
+            if [ -f docker-compose.yml ]; then
+              docker compose up -d --build
+            elif [ -f backend/Dockerfile ]; then
+              cd backend && docker build -t ai-bot . && docker run -d -p 8000:8000 --restart unless-stopped ai-bot
+            else
+              # Direct Python restart (fallback)
+              pkill -f "uvicorn" || true
+              cd backend
+              nohup python -m uvicorn main:app --host 0.0.0.0 --port 8000 > /dev/null 2>&1 &
+            fi
+            
+            echo "✅ Deployment complete!"
+            echo "🔍 Health check:"
+            curl -s http://localhost:8000/health || echo "Health check failed"
+          REMOTE_SCRIPT
