@@ -12,26 +12,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup SSH
-        uses: webfactory/ssh-agent@v0.9.0
+      - name: Deploy to fserver via SSH
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          ssh-private-key: ${{ secrets.FSERVER_SSH_KEY }}
-          log-public-key: false
-
-      - name: Add host to known_hosts
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -H 167.233.103.236 >> ~/.ssh/known_hosts
-
-      - name: Deploy on fserver
-        env:
-          SERVER_IP: 167.233.103.236
-          SERVER_USER: root
-          DEPLOY_PATH: /root/ai-bot
-        run: |
-          echo "🚀 Deploying to $SERVER_IP..."
-          ssh $SERVER_USER@$SERVER_IP << 'REMOTE_SCRIPT'
+          host: 167.233.103.236
+          username: root
+          key: ${{ secrets.FSERVER_SSH_KEY }}
+          port: 22
+          script: |
             set -e
+            echo "🚀 Starting deployment..."
             cd /root/ai-bot
             
             echo "📥 Pulling latest code..."
@@ -42,15 +32,16 @@ jobs:
             if [ -f docker-compose.yml ]; then
               docker compose up -d --build
             elif [ -f backend/Dockerfile ]; then
-              cd backend && docker build -t ai-bot . && docker run -d -p 8000:8000 --restart unless-stopped ai-bot
+              cd backend
+              docker build -t ai-bot .
+              docker run -d -p 8000:8000 --restart unless-stopped --name ai-bot-backend ai-bot || docker restart ai-bot-backend
             else
-              # Direct Python restart (fallback)
               pkill -f "uvicorn" || true
               cd backend
-              nohup python -m uvicorn main:app --host 0.0.0.0 --port 8000 > /dev/null 2>&1 &
+              nohup python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > /dev/null 2>&1 &
             fi
             
             echo "✅ Deployment complete!"
+            sleep 3
             echo "🔍 Health check:"
             curl -s http://localhost:8000/health || echo "Health check failed"
-          REMOTE_SCRIPT
