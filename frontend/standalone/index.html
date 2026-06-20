@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Advanced AI Bot</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: Arial, sans-serif; background:#0b1020; color:#eaf0ff; }
+    .app { max-width: 980px; margin: 0 auto; padding: 24px; }
+    .muted { color:#9aa7c7; }
+    .card { background:#121a33; border:1px solid #253154; border-radius:16px; padding:18px; margin:18px 0; }
+    input, textarea, select { width:100%; margin:8px 0; padding:12px; border-radius:10px; border:1px solid #344060; background:#0b1020; color:#eaf0ff; }
+    textarea { min-height:70px; }
+    button { padding:12px 16px; border:0; border-radius:10px; background:#6c8cff; color:white; cursor:pointer; font-weight:bold; }
+    button.secondary { background:#253154; }
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .row input { flex:1; min-width:180px; }
+    .row select { max-width:220px; min-width:180px; }
+    .row label { min-width:140px; }
+    .chatbox { min-height:280px; max-height:420px; overflow:auto; background:#080c18; border-radius:12px; padding:12px; margin:12px 0; }
+    .msg { padding:10px; margin:8px 0; border-radius:10px; white-space:pre-wrap; }
+    .msg.user { background:#1c3d7a; text-align:right; }
+    .msg.assistant { background:#1d2b4f; }
+    .msg.system { background:#5a2d2d; }
+    .pill { display:inline-block; padding:4px 8px; border-radius:999px; background:#253154; color:#b7c4e8; font-size:12px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <h1>Advanced AI Bot</h1>
+    <p class="muted">Real-time chat, customer tokens, provider fallback, and safe addons.</p>
+
+    <section class="card">
+      <h2>Admin: Create Customer Token <span class="pill">Backend: localhost:8000</span></h2>
+      <input id="adminKey" value="change-me-admin-key" placeholder="Admin key" />
+      <input id="owner" value="client_a" placeholder="Owner name" />
+      <input id="balance" type="number" value="1000" placeholder="Balance" />
+      <button id="createToken">Create Token</button>
+      <p id="adminStatus" class="muted"></p>
+    </section>
+
+    <section class="card">
+      <h2>Chat</h2>
+      <textarea id="apiToken" placeholder="Customer API token sk_live_..."></textarea>
+      <div class="row">
+        <select id="provider">
+          <option value="auto">Auto fallback</option>
+          <option value="groq">Groq</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="deepseek">DeepSeek</option>
+          <option value="openai">OpenAI</option>
+        </select>
+        <label><input id="useRag" type="checkbox" style="width:auto" /> RAG addon</label>
+        <button id="connect">Connect</button>
+        <button id="disconnect" class="secondary">Disconnect</button>
+      </div>
+      <p>Status: <b id="status">Disconnected</b> <span id="tokensWrap" style="display:none"> | Tokens: <b id="tokensLeft"></b></span></p>
+      <div id="chatbox" class="chatbox"></div>
+      <div class="row">
+        <input id="messageInput" placeholder="Type a message..." />
+        <button id="send">Send</button>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const API = 'http://localhost:8000';
+    const WS = 'ws://localhost:8000/ws/chat';
+    let socket = null;
+
+    const $ = id => document.getElementById(id);
+    function addMsg(role, content) {
+      const el = document.createElement('div');
+      el.className = 'msg ' + role;
+      el.innerHTML = '<b>' + role + '</b>: ' + escapeHtml(content);
+      $('chatbox').appendChild(el);
+      $('chatbox').scrollTop = $('chatbox').scrollHeight;
+      return el;
+    }
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    }
+    function setStatus(s) { $('status').textContent = s; }
+    function setTokens(v) {
+      $('tokensLeft').textContent = v;
+      $('tokensWrap').style.display = v === null || v === undefined ? 'none' : 'inline';
+    }
+
+    $('createToken').onclick = async () => {
+      $('adminStatus').textContent = 'Creating token...';
+      try {
+        const res = await fetch(API + '/admin/tokens', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json', 'x-admin-key': $('adminKey').value},
+          body: JSON.stringify({owner_name: $('owner').value, balance: Number($('balance').value)})
+        });
+        const data = await res.json();
+        if (data.api_token) {
+          $('apiToken').value = data.api_token;
+          $('adminStatus').textContent = 'Token created.';
+        } else {
+          $('adminStatus').textContent = JSON.stringify(data);
+        }
+      } catch (e) {
+        $('adminStatus').textContent = 'Error: ' + e.message;
+      }
+    };
+
+    $('connect').onclick = () => {
+      const token = $('apiToken').value.trim();
+      if (!token) return alert('Paste or create an API token first');
+      if (socket) socket.close();
+      socket = new WebSocket(WS + '?token=' + encodeURIComponent(token));
+      socket.onopen = () => setStatus('Connected');
+      socket.onclose = () => setStatus('Disconnected');
+      socket.onerror = () => setStatus('Error');
+      socket.onmessage = event => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'ready') setTokens(data.tokens_remaining);
+        if (data.type === 'chunk') {
+          let last = $('chatbox').lastElementChild;
+          if (!last || !last.classList.contains('assistant') || last.dataset.done === '1') {
+            last = addMsg('assistant', '');
+          }
+          last.innerHTML = '<b>assistant</b>: ' + escapeHtml(last.textContent.replace(/^assistant: /, '') + data.content);
+        }
+        if (data.type === 'done') {
+          setTokens(data.tokens_remaining);
+          const last = $('chatbox').lastElementChild;
+          if (last) last.dataset.done = '1';
+        }
+        if (data.type === 'error') addMsg('system', data.message || JSON.stringify(data));
+      };
+    };
+
+    $('disconnect').onclick = () => { if (socket) socket.close(); };
+
+    function send() {
+      const text = $('messageInput').value.trim();
+      if (!socket || socket.readyState !== 1) return alert('Connect first');
+      if (!text) return;
+      addMsg('user', text);
+      socket.send(JSON.stringify({content: text, provider: $('provider').value, addons: $('useRag').checked ? ['rag'] : []}));
+      $('messageInput').value = '';
+    }
+    $('send').onclick = send;
+    $('messageInput').addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+  </script>
+</body>
+</html>

@@ -1,0 +1,59 @@
+# Secrets / environment
+.env
+*.env
+.env.*
+!.env.example
+backend/.env
+frontend/.env
+
+# Databases / runtime state
+*.db
+*.sqlite
+*.sqlite3
+backend/data/
+data/
+!data/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+site-packages/
+
+# Node / frontend
+node_modules/
+dist/
+build/
+.next/
+.vite/
+coverage/
+
+# Logs / temp / cache
+*.log
+logs/
+tmp/
+.cache/
+*.pid
+.DS_Store
+
+# Backups / archives
+*.bak
+*.backup
+*.old
+*.orig
+*.tar
+*.tar.gz
+*.zip
+*.7z
+*.rar
+*.bak-*
+*.pre-restore*
+ai-bot.pre-restore/
+
+# Docker local overrides
+/docker-compose.override.yml
