@@ -14,17 +14,20 @@ jobs:
 
       - name: Setup SSH and Deploy
         env:
-          SSH_KEY: ${{ secrets.FSERVER_SSH_KEY }}
+          SSH_KEY_B64: ${{ secrets.FSERVER_SSH_KEY }}
           SERVER_IP: 167.233.103.236
           SERVER_USER: root
         run: |
-          echo "🔧 Setting up SSH key..."
+          echo "🔧 Decoding SSH key..."
           mkdir -p ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/fserver_key
+          echo "$SSH_KEY_B64" | base64 -d > ~/.ssh/fserver_key
           chmod 600 ~/.ssh/fserver_key
-          ssh-keyscan -H $SERVER_IP > ~/.ssh/known_hosts 2>/dev/null
+          ssh-keyscan -H $SERVER_IP > ~/.ssh/known_hosts 2>/dev/null || true
           
-          echo "🚀 Deploying to fserver..."
+          echo "🚀 Testing SSH connection..."
+          ssh -i ~/.ssh/fserver_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 $SERVER_USER@$SERVER_IP "echo 'SSH_OK'"
+          
+          echo "🚀 Deploying..."
           ssh -i ~/.ssh/fserver_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $SERVER_USER@$SERVER_IP << 'REMOTE_SCRIPT'
             set -e
             echo "📥 Pulling latest code..."
