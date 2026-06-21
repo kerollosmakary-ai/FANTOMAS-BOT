@@ -12,19 +12,23 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy to fserver via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: 167.233.103.236
-          username: root
-          key: ${{ secrets.FSERVER_SSH_KEY }}
-          port: 22
-          script: |
+      - name: Setup SSH and Deploy
+        env:
+          SSH_KEY: ${{ secrets.FSERVER_SSH_KEY }}
+          SERVER_IP: 167.233.103.236
+          SERVER_USER: root
+        run: |
+          echo "🔧 Setting up SSH key..."
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/fserver_key
+          chmod 600 ~/.ssh/fserver_key
+          ssh-keyscan -H $SERVER_IP > ~/.ssh/known_hosts 2>/dev/null
+          
+          echo "🚀 Deploying to fserver..."
+          ssh -i ~/.ssh/fserver_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $SERVER_USER@$SERVER_IP << 'REMOTE_SCRIPT'
             set -e
-            echo "🚀 Starting deployment..."
-            cd /root/ai-bot
-            
             echo "📥 Pulling latest code..."
+            cd /root/ai-bot
             git fetch origin
             git reset --hard origin/main || git reset --hard origin/master
             
@@ -34,7 +38,8 @@ jobs:
             elif [ -f backend/Dockerfile ]; then
               cd backend
               docker build -t ai-bot .
-              docker run -d -p 8000:8000 --restart unless-stopped --name ai-bot-backend ai-bot || docker restart ai-bot-backend
+              docker rm -f ai-bot-backend 2>/dev/null || true
+              docker run -d -p 8000:8000 --restart unless-stopped --name ai-bot-backend ai-bot
             else
               pkill -f "uvicorn" || true
               cd backend
@@ -43,5 +48,5 @@ jobs:
             
             echo "✅ Deployment complete!"
             sleep 3
-            echo "🔍 Health check:"
             curl -s http://localhost:8000/health || echo "Health check failed"
+          REMOTE_SCRIPT
